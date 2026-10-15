@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quadratic Differentiator</title>
+<style>
+:root{--bg:#f3f1ec;--panel:#fffdf8;--ink:#1d2433;--muted:#5f6878;--line:#d9d4c7;--accent:#2b4fa3;--accent-ink:#fff;--ok:#1d7a4a;--bad:#a8402b}
+@media (prefers-color-scheme:dark){:root{--bg:#14171f;--panel:#1c212c;--ink:#e8ebf2;--muted:#9aa3b5;--line:#2f3645;--accent:#8aa8f0;--accent-ink:#10162a;--ok:#5fcf96;--bad:#f09378}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.55 Georgia,serif}
+.wrap{max-width:720px;margin:0 auto;padding:24px 16px 48px}
+h1{margin:0 0 4px;font-size:1.7rem}
+.sub{margin:0 0 20px;color:var(--muted)}
+.levels{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap}
+.levels button{flex:1;min-width:140px;padding:10px;border:1px solid var(--line);background:var(--panel);border-radius:10px;cursor:pointer;text-align:left}
+.levels button small{display:block;color:var(--muted)}
+.levels button[aria-checked=true]{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:18px;margin-bottom:14px}
+.eq{font-size:1.5rem;margin:8px 0;font-family:"Cambria Math",Georgia,serif}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+button.act{padding:9px 16px;border-radius:8px;border:1px solid var(--line);background:var(--panel);cursor:pointer}
+button.main{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:700}
+button:disabled{opacity:.5;cursor:default}
+input[type=text]{flex:1;min-width:180px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+.fb{margin-top:12px;padding:10px 12px;border-left:3px solid var(--accent);background:var(--bg);white-space:pre-wrap}
+.fb.ok{border-color:var(--ok)}.fb.bad{border-color:var(--bad)}
+ol{padding-left:20px;margin:8px 0}
+.muted{color:var(--muted)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Quadratic Differentiator</h1>
+  <p class="sub">One core skill — solving ax² + bx + c = 0 — adapted by AI to three learner levels.</p>
+
+  <div class="levels" role="radiogroup" aria-label="Difficulty level" id="levels">
+    <button role="radio" aria-checked="true" data-l="1">Level 1: Foundation<small>Guided steps, direct hints</small></button>
+    <button role="radio" aria-checked="false" data-l="2">Level 2: Standard<small>Grade-level problem</small></button>
+    <button role="radio" aria-checked="false" data-l="3">Level 3: Advanced<small>Real-world modelling</small></button>
+  </div>
+
+  <div class="card" id="task" aria-live="polite">
+    <span class="muted">Loading your first problem…</span>
+  </div>
+
+  <div class="card" id="work" hidden>
+    <div class="row" style="margin-top:0">
+      <input type="text" id="ans" aria-label="Your answer" placeholder="Your answer, e.g. 2, 3 or -1, 5/2">
+      <button class="act main" id="check">Check</button>
+    </div>
+    <div class="row">
+      <button class="act" id="hint">Get a hint</button>
+      <button class="act" id="steps">Show worked steps</button>
+      <button class="act" id="new">New problem</button>
+    </div>
+    <div id="out"></div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let level = 1, cur = null, hintNo = 0, busy = false;
+
+async function api(body) {
+  const r = await fetch('/api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error || 'Request failed');
+  return d;
+}
+
+function eqText(a, b, c) {
+  const term = (k, v, first) => {
+    if (k === 0) return '';
+    const sign = k < 0 ? '−' : (first ? '' : '+');
+    const mag = Math.abs(k);
+    const body = v ? (mag === 1 ? v : mag + v) : mag;
+    return (first ? sign : ' ' + sign + ' ') + body;
+  };
+  return (term(a, 'x²', true) + term(b, 'x', false) + term(c, '', false)) + ' = 0';
+}
+
+function show(msg, cls) {
+  const d = document.createElement('div');
+  d.className = 'fb ' + (cls || '');
+  d.textContent = msg;
+  $('out').prepend(d);
+}
+
+function setBusy(v) {
+  busy = v;
+  ['check', 'hint', 'steps', 'new'].forEach(i => $(i).disabled = v);
+}
+
+async function load() {
+  setBusy(true);
+  $('out').innerHTML = '';
+  $('ans').value = '';
+  hintNo = 0;
+  $('task').innerHTML = '<span class="muted">Generating a level-' + level + ' problem…</span>';
+  try {
+    cur = await api({ mode: 'generate', level });
+    const t = $('task');
+    t.innerHTML = '';
+    const h = document.createElement('strong'); h.textContent = cur.title;
+    const p = document.createElement('p'); p.textContent = cur.problem;
+    t.append(h, p);
+    if (level < 3) {
+      const e = document.createElement('div'); e.className = 'eq'; e.textContent = eqText(cur.a, cur.b, cur.c);
+      t.append(e);
+    }
+    $('work').hidden = false;
+  } catch (e) {
+    $('task').textContent = 'Could not load a problem: ' + e.message;
+  }
+  setBusy(false);
+}
+
+function parseAnswer(s) {
+  return s.split(/[,;]|\band\b|\s+/i).map(x => x.trim()).filter(Boolean).map(x => {
+    const m = x.match(/^(-?\d+(?:\.\d+)?)\/(\d+(?:\.\d+)?)$/);
+    return m ? Number(m[1]) / Number(m[2]) : Number(x.replace('−', '-'));
+  });
+}
+function expected() {
+  return cur.ask === 'positive' ? cur.roots.filter(r => r > 0) : cur.roots;
+}
+function isCorrect(vals) {
+  if (vals.some(Number.isNaN)) return null;
+  const exp = expected();
+  const got = [...new Set(vals.map(v => Math.round(v * 1000) / 1000))].sort((x, y) => x - y);
+  return got.length === exp.length && got.every((g, i) => Math.abs(g - exp[i]) < 0.01);
+}
+
+$('levels').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b || busy) return;
+  level = Number(b.dataset.l);
+  document.querySelectorAll('#levels button').forEach(x => x.setAttribute('aria-checked', x === b));
+  load();
+});
+
+$('new').onclick = load;
+
+$('check').onclick = async () => {
+  const txt = $('ans').value.trim();
+  if (!txt) return;
+  const ok = isCorrect(parseAnswer(txt));
+  if (ok === null) { show('Please enter numbers, e.g. 2, 3 or 5/2.', 'bad'); return; }
+  setBusy(true);
+  try {
+    const d = await api({ mode: 'feedback', level, problem: cur.problem, a: cur.a, b: cur.b, c: cur.c, attempt: txt, verdict: ok ? 'correct' : 'incorrect' });
+    show((ok ? 'Correct. ' : 'Not yet. ') + d.text, ok ? 'ok' : 'bad');
+  } catch (e) { show('AI feedback unavailable: ' + e.message, 'bad'); }
+  setBusy(false);
+};
+
+$('hint').onclick = async () => {
+  hintNo++;
+  setBusy(true);
+  try {
+    const d = await api({ mode: 'hint', level, hintNo, problem: cur.problem, a: cur.a, b: cur.b, c: cur.c, attempt: $('ans').value });
+    show('Hint ' + Math.min(hintNo, 3) + ': ' + d.text);
+  } catch (e) { show('Hint unavailable: ' + e.message, 'bad'); }
+  setBusy(false);
+};
+
+$('steps').onclick = () => {
+  const box = document.createElement('div'); box.className = 'fb';
+  const ol = document.createElement('ol');
+  cur.steps.forEach(s => { const li = document.createElement('li'); li.textContent = s; ol.append(li); });
+  const v = document.createElement('div');
+  v.textContent = 'Model equation: ' + eqText(cur.a, cur.b, cur.c) + '\nRoots verified by code: ' + cur.roots.map(r => 'x = ' + r).join(', ') +
+    (cur.ask === 'positive' ? '\nAnswer for this problem: x = ' + expected()[0] : '');
+  v.style.whiteSpace = 'pre-wrap';
+  box.append(ol, v);
+  $('out').prepend(box);
+};
+
+load();
+</script>
+</body>
+</html>
